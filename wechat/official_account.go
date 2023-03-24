@@ -43,16 +43,18 @@ func GetOfficialAccount() *officialaccount.OfficialAccount {
 func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w http.ResponseWriter) error {
 	server := oa.GetServer(req, w)
 
-	act, _ := server.GetAccessToken()
-	http.Get(fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/menu/delete?access_token=%s", act))
-
 	// 设置接收消息的处理方法
 	server.SetMessageHandler(func(msg *message.MixMessage) *message.Reply {
+		if msg.Content == "" {
+			log.Info("empty content", zap.Any("wechat_msg", msg))
+			return nil
+		}
+
 		openaiClient := openai.GetClient()
 		resp, err := openai.Chat(openaiClient, msg.Content)
 		if err != nil {
 			log.Error("openai chat failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
-			return &message.Reply{MsgType: message.MsgTypeText, MsgData: message.NewText("openai chat failed")}
+			return nil
 		}
 
 		log.Info("openai chat success", zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
