@@ -93,9 +93,10 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 			log.Warn("openai chat timeout", zap.Any("wechat_msg", msg))
 
 			go func() {
+				var resp *openai.ChatCompletionResponse
 				select {
 				case v := <-ch:
-					resp := f(v)
+					resp = f(v)
 					if resp == nil {
 						return
 					}
