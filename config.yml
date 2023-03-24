@@ -1,0 +1,8 @@
+openai:
+  key: ""
+
+wechat:
+  app_id: ""
+  app_secret: ""
+  token: ""
+  encoding_aes_key: ""
