@@ -10,6 +10,8 @@ import (
 	"github.com/k8scat/wechat-openai/config"
 )
 
+type ChatCompletionResponse = openai.ChatCompletionResponse
+
 var (
 	initClient sync.Once
 	client     *openai.Client

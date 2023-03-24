@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/errors"
 	"github.com/silenceper/wechat/v2"
 	"github.com/silenceper/wechat/v2/cache"
 	"github.com/silenceper/wechat/v2/officialaccount"
@@ -63,10 +64,56 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 			return nil
 		}
 
-		openaiClient := openai.GetClient()
-		resp, err := openai.Chat(openaiClient, msg.Content)
-		if err != nil {
-			log.Error("openai chat failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
+		ch := make(chan interface{}, 1)
+		go func() {
+			openaiClient := openai.GetClient()
+			resp, err := openai.Chat(openaiClient, msg.Content)
+			if err != nil {
+				ch <- errors.Trace(err)
+				return
+			}
+			ch <- resp
+		}()
+
+		f := func(v interface{}) *openai.ChatCompletionResponse {
+			switch v.(type) {
+			case error:
+				log.Error("openai chat failed", zap.Error(v.(error)), zap.Stack("stack"), zap.Any("wechat_msg", msg))
+			case *openai.ChatCompletionResponse:
+				return v.(*openai.ChatCompletionResponse)
+			}
+			return nil
+		}
+
+		var resp *openai.ChatCompletionResponse
+		select {
+		case v := <-ch:
+			resp = f(v)
+		case <-time.After(4 * time.Second):
+			log.Warn("openai chat timeout", zap.Any("wechat_msg", msg))
+
+			go func() {
+				select {
+				case v := <-ch:
+					resp := f(v)
+					if resp == nil {
+						return
+					}
+				}
+				err := oa.GetCustomerMessageManager().Send(&message.CustomerMessage{
+					ToUser:  string(msg.FromUserName),
+					Msgtype: message.MsgTypeText,
+					Text: &message.MediaText{
+						Content: resp.Choices[0].Message.Content,
+					},
+				})
+				if err != nil {
+					log.Error("send customer message failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
+				}
+			}()
+		}
+
+		if resp == nil {
 			return nil
 		}
 
