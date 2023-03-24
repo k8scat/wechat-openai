@@ -1,6 +1,8 @@
 package router
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"github.com/juju/errors"
 	"go.uber.org/zap"
@@ -9,7 +11,7 @@ import (
 	"github.com/k8scat/wechat-openai/wechat"
 )
 
-func Run() error {
+func Run(port int) error {
 	r := gin.Default()
 	r.Any("/callback", func(c *gin.Context) {
 		oa := wechat.GetOfficialAccount()
@@ -18,6 +20,6 @@ func Run() error {
 		}
 	})
 
-	err := r.Run()
+	err := r.Run(fmt.Sprintf(":%d", port))
 	return errors.Trace(err)
 }
