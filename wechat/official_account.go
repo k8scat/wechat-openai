@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/silenceper/wechat/v2"
 	"github.com/silenceper/wechat/v2/cache"
@@ -20,6 +21,8 @@ import (
 var (
 	initOfficialAccount sync.Once
 	officialAccount     *officialaccount.OfficialAccount
+
+	msgCache = cache.NewMemory()
 )
 
 func GetOfficialAccount() *officialaccount.OfficialAccount {
@@ -45,6 +48,16 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 
 	// 设置接收消息的处理方法
 	server.SetMessageHandler(func(msg *message.MixMessage) *message.Reply {
+		msgID := fmt.Sprintf("%d", msg.MsgID)
+		if msgCache.IsExist(msgID) {
+			log.Warn("duplicated msg", zap.Any("wechat_msg", msg))
+			return nil
+		}
+		if err := msgCache.Set(msgID, nil, time.Minute); err != nil {
+			log.Error("cache msg id failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
+			return nil
+		}
+
 		if msg.Content == "" {
 			log.Info("empty content", zap.Any("wechat_msg", msg))
 			return nil
