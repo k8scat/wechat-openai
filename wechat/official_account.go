@@ -1,6 +1,7 @@
 package wechat
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/k8scat/wechat-openai/config"
+	"github.com/k8scat/wechat-openai/db"
 	"github.com/k8scat/wechat-openai/log"
 	"github.com/k8scat/wechat-openai/openai"
 )
@@ -22,8 +24,6 @@ import (
 var (
 	initOfficialAccount sync.Once
 	officialAccount     *officialaccount.OfficialAccount
-
-	msgCache = cache.NewMemory()
 )
 
 func GetOfficialAccount() *officialaccount.OfficialAccount {
@@ -50,11 +50,17 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 	// 设置接收消息的处理方法
 	server.SetMessageHandler(func(msg *message.MixMessage) *message.Reply {
 		msgID := fmt.Sprintf("%d", msg.MsgID)
-		if msgCache.IsExist(msgID) {
+
+		ctx := context.Background()
+		conn := db.GetRedisClient().Conn()
+		defer conn.Close()
+
+		if conn.Exists(ctx, msgID).Val() > 0 {
 			log.Warn("duplicated msg", zap.Any("wechat_msg", msg))
 			return nil
 		}
-		if err := msgCache.Set(msgID, nil, time.Minute); err != nil {
+
+		if err := conn.SetEx(ctx, msgID, "", time.Minute).Err(); err != nil {
 			log.Error("cache msg id failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
 			return nil
 		}
@@ -101,17 +107,18 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 						return
 					}
 				}
-				err := oa.GetCustomerMessageManager().Send(&message.CustomerMessage{
-					ToUser:  string(msg.FromUserName),
-					Msgtype: message.MsgTypeText,
-					Text: &message.MediaText{
-						Content: resp.Choices[0].Message.Content,
-					},
-				})
+
+				conn := db.GetRedisClient().Conn()
+				defer conn.Close()
+
+				err := conn.SetEx(ctx, msgID, resp.Choices[0].Message.Content, time.Minute*5).Err()
 				if err != nil {
-					log.Error("send customer message failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
+					log.Error("cache message response failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
 				}
 			}()
+
+			url := fmt.Sprintf("%s/message/%d", config.GetConfig().App.BaseURL, msg.MsgID)
+			return &message.Reply{MsgType: message.MsgTypeText, MsgData: message.NewText(url)}
 		}
 
 		if resp == nil {
@@ -125,7 +132,7 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 	// 处理消息接收以及回复
 	err := server.Serve()
 	if err != nil {
-		fmt.Println(err)
+		log.Error("serve failed", zap.Error(err), zap.Stack("stack"))
 		return nil
 	}
 	// 发送回复的消息

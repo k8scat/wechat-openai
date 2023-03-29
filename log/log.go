@@ -1,8 +1,9 @@
 package log
 
 import (
+	"os"
+	"path"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -13,15 +14,18 @@ var (
 	logger     *zap.Logger
 )
 
-const logFile = "wechat-openai.log"
+const logFile = "logs/wechat-openai.log"
 
 func GetLogger() *zap.Logger {
 	initLogger.Do(func() {
 		logCfg := zap.NewProductionConfig()
-		logCfg.OutputPaths = append(logCfg.OutputPaths, logFile)
-		logCfg.EncoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-			encodeTimeLayout(t, "2006-01-02 15:04:05.000", enc)
+
+		if err := os.MkdirAll(path.Dir(logFile), os.ModePerm); err != nil {
+			panic(err)
 		}
+
+		logCfg.OutputPaths = append(logCfg.OutputPaths, logFile)
+		logCfg.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
 
 		var err error
 		logger, err = logCfg.Build()
@@ -32,21 +36,10 @@ func GetLogger() *zap.Logger {
 	return logger
 }
 
-func encodeTimeLayout(t time.Time, layout string, enc zapcore.PrimitiveArrayEncoder) {
-	type appendTimeEncoder interface {
-		AppendTimeLayout(time.Time, string)
-	}
-
-	if enc, ok := enc.(appendTimeEncoder); ok {
-		enc.AppendTimeLayout(t, layout)
-		return
-	}
-
-	enc.AppendString(t.Format(layout))
-}
-
 func Sync() {
-	GetLogger().Sync()
+	if err := GetLogger().Sync(); err != nil {
+		panic(err)
+	}
 }
 
 func Info(msg string, fields ...zapcore.Field) {

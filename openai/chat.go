@@ -20,7 +20,12 @@ var (
 func GetClient() *openai.Client {
 	initClient.Do(func() {
 		cfg := config.GetConfig()
-		client = openai.NewClient(cfg.Openai.Key)
+		clientCfg := openai.DefaultConfig(cfg.OpenAI.Key)
+		if cfg.OpenAI.BaseURL != "" {
+			clientCfg.BaseURL = cfg.OpenAI.BaseURL
+		}
+		client = openai.NewClientWithConfig(clientCfg)
+		client = openai.NewClient(cfg.OpenAI.Key)
 	})
 	return client
 }

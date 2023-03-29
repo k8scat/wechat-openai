@@ -15,8 +15,9 @@ var (
 )
 
 type Config struct {
-	Openai struct {
-		Key string `yaml:"key"`
+	OpenAI struct {
+		BaseURL string `yaml:"base_url"`
+		Key     string `yaml:"key"`
 	} `yaml:"openai"`
 
 	Wechat struct {
@@ -25,6 +26,16 @@ type Config struct {
 		Token          string `yaml:"token"`
 		EncodingAESKey string `yaml:"encoding_aes_key"`
 	} `yaml:"wechat"`
+
+	App struct {
+		BaseURL string `yaml:"base_url"`
+	}
+
+	Redis struct {
+		Host     string `yaml:"host"`
+		Port     int    `yaml:"port"`
+		Password string `yaml:"password"`
+	}
 }
 
 func GetConfig() *Config {
