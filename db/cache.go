@@ -13,10 +13,13 @@ var (
 
 func GetCache() Cache {
 	cacheInit.Do(func() {
-		if config.GetConfig().Redis.Host != "" {
+		switch config.GetConfig().Storage {
+		case "redis":
 			c = NewRedisCache()
-		} else {
+		case "memory":
 			c = NewMemCache()
+		default:
+			panic("unknown storage")
 		}
 	})
 	return c

@@ -11,7 +11,8 @@ wechat:
 app:
   base_url: ""
 
+storage: "memory" # memory or redis
 redis:
-  host: ""
+  host: "redis"
   port: 6379
   password: ""
