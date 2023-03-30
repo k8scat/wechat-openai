@@ -7,4 +7,5 @@ FROM alpine:3.16
 WORKDIR /app
 COPY --from=builder /app/bin/wechat-openai .
 EXPOSE 8080
+ENV TZ=Asia/Shanghai
 CMD ["./wechat-openai", "-config", "config/config.yml"]
