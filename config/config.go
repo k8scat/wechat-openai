@@ -31,8 +31,7 @@ type Config struct {
 		BaseURL string `yaml:"base_url"`
 	}
 
-	Storage string `yaml:"storage"`
-	Redis   struct {
+	Redis struct {
 		Host     string `yaml:"host"`
 		Port     int    `yaml:"port"`
 		Password string `yaml:"password"`

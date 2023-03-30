@@ -1,6 +1,7 @@
 package wechat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -53,30 +54,50 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 			return nil
 		}
 
+		userID := string(msg.FromUserName)
 		msgKey := fmt.Sprintf("message:%d", msg.MsgID)
-		c := db.GetCache()
-		if c.Exists(msgKey) {
+
+		conn := db.GetRedisClient().Conn()
+		defer conn.Close()
+		ctx := context.Background()
+
+		if msg.Content == "/help" {
+			return &message.Reply{
+				MsgType: message.MsgTypeText,
+				MsgData: message.NewText("chat with me, send /clear to clear chat history"),
+			}
+		} else if msg.Content == "/clear" {
+			if err := conn.Del(ctx, userID).Err(); err != nil {
+				log.Error("clear chat history failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
+			}
+			return &message.Reply{
+				MsgType: message.MsgTypeText,
+				MsgData: message.NewText("chat history cleared"),
+			}
+		}
+
+		if conn.HExists(ctx, userID, msgKey).Val() {
 			log.Warn("duplicated msg", zap.Any("wechat_msg", msg))
 			return nil
 		}
 
-		m := map[string]string{
-			"message": msg.Content,
+		chat := &openai.Chat{
+			Question: msg.Content,
 		}
-		b, err := json.Marshal(m)
+		b, err := json.Marshal(chat)
 		if err != nil {
 			log.Error("marshal failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
 			return nil
 		}
-		if err := c.Set(msgKey, string(b), 0); err != nil {
-			log.Error("cache msg id failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
+		if err := conn.HSet(ctx, userID, msgKey, string(b)).Err(); err != nil {
+			log.Error("store chat failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
 			return nil
 		}
 
 		ch := make(chan interface{}, 1)
 		go func() {
 			openaiClient := openai.GetClient()
-			resp, err := openai.Chat(openaiClient, msg.Content)
+			resp, err := openai.CreateChat(openaiClient, userID, msg.Content)
 			if err != nil {
 				ch <- errors.Trace(err)
 				return
@@ -87,7 +108,7 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 		f := func(v interface{}) *openai.ChatCompletionResponse {
 			switch v.(type) {
 			case error:
-				log.Error("openai chat failed", zap.Error(v.(error)), zap.Stack("stack"), zap.Any("wechat_msg", msg))
+				log.Error("chat failed", zap.Error(v.(error)), zap.Stack("stack"), zap.Any("wechat_msg", msg))
 			case *openai.ChatCompletionResponse:
 				return v.(*openai.ChatCompletionResponse)
 			}
@@ -99,9 +120,9 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 		case v := <-ch:
 			resp = f(v)
 		case <-time.After(4 * time.Second):
-			log.Warn("openai chat timeout", zap.Any("wechat_msg", msg))
+			log.Warn("chat timeout", zap.Any("wechat_msg", msg))
 
-			go func(key string, data map[string]string) {
+			go func(userID, msgKey string, t *openai.Chat) {
 				var resp *openai.ChatCompletionResponse
 				select {
 				case v := <-ch:
@@ -111,20 +132,22 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 					}
 				}
 
-				m["response"] = resp.Choices[0].Message.Content
-				b, err := json.Marshal(m)
+				t.Answer = resp.Choices[0].Message.Content
+				b, err := json.Marshal(t)
 				if err != nil {
 					log.Error("marshal failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
 					return
 				}
 
-				c := db.GetCache()
-				if err := c.Set(key, string(b), 0); err != nil {
-					log.Error("cache message response failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
+				conn := db.GetRedisClient().Conn()
+				defer conn.Close()
+				ctx := context.Background()
+				if err := conn.HSet(ctx, userID, msgKey, string(b)).Err(); err != nil {
+					log.Error("store chat failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
 				}
-			}(msgKey, m)
+			}(userID, msgKey, chat)
 
-			url := fmt.Sprintf("%s/message/%d", config.GetConfig().App.BaseURL, msg.MsgID)
+			url := fmt.Sprintf("%s/user/%s/message/%d", config.GetConfig().App.BaseURL, userID, msg.MsgID)
 			return &message.Reply{MsgType: message.MsgTypeText, MsgData: message.NewText(url)}
 		}
 
@@ -132,7 +155,7 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 			return nil
 		}
 
-		log.Info("openai chat success", zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
+		log.Info("chat success", zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
 		return &message.Reply{MsgType: message.MsgTypeText, MsgData: message.NewText(resp.Choices[0].Message.Content)}
 	})
 
@@ -144,5 +167,4 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 	}
 	// 发送回复的消息
 	return server.Send()
-
 }

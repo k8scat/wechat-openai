@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,12 +14,13 @@ import (
 
 	"github.com/k8scat/wechat-openai/db"
 	"github.com/k8scat/wechat-openai/log"
+	"github.com/k8scat/wechat-openai/openai"
 	"github.com/k8scat/wechat-openai/wechat"
 )
 
 func Run(port int) error {
 	r := gin.Default()
-	r.Use(ginzap.Ginzap(log.GetLogger(), time.RFC3339, true))
+	r.Use(ginzap.Ginzap(log.GetLogger(), time.RFC3339, false))
 
 	r.Any("/callback", func(c *gin.Context) {
 		oa := wechat.GetOfficialAccount()
@@ -27,32 +29,37 @@ func Run(port int) error {
 		}
 	})
 
-	r.GET("/message/:msgID", func(c *gin.Context) {
+	r.GET("/user/:userID/message/:msgID", func(c *gin.Context) {
+		userID := c.Param("userID")
 		msgID := c.Param("msgID")
 		msgKey := fmt.Sprintf("message:%s", msgID)
-		cache := db.GetCache()
-		if !cache.Exists(msgKey) {
-			c.String(http.StatusNotFound, "message not found")
+
+		conn := db.GetRedisClient().Conn()
+		defer conn.Close()
+		ctx := context.Background()
+
+		if !conn.HExists(ctx, userID, msgKey).Val() {
+			c.String(http.StatusNotFound, "chat not found")
 			return
 		}
 
-		resp, err := cache.Get(msgKey)
-		if err != nil {
-			c.String(http.StatusInternalServerError, "get message failed")
+		cmd := conn.HGet(ctx, userID, msgKey)
+		if cmd.Err() != nil {
+			c.String(http.StatusInternalServerError, "get chat failed")
 			return
 		}
-		s, _ := resp.(string)
-		m := make(map[string]string)
-		if err := json.Unmarshal([]byte(s), &m); err != nil {
-			c.String(http.StatusInternalServerError, "invalid message")
+		s := cmd.Val()
+		var chat openai.Chat
+		if err := json.Unmarshal([]byte(s), &chat); err != nil {
+			c.String(http.StatusInternalServerError, "invalid chat")
 			return
 		}
-		if _, ok := m["response"]; !ok {
-			c.String(http.StatusNotFound, "waiting for response")
+		if chat.Answer == "" {
+			c.String(http.StatusNotFound, "waiting for answer")
 			return
 		}
 
-		content := fmt.Sprintf("message:\n %s\n\n\nresponse:\n %s", m["message"], m["response"])
+		content := fmt.Sprintf("question:\n %s\n\n\nanswer:\n %s", chat.Question, chat.Answer)
 		c.String(http.StatusOK, content)
 	})
 

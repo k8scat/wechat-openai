@@ -10,18 +10,6 @@
 docker compose up -d
 ```
 
-## Storage
-
-支持内存存储和 Redis 存储
-
-```yaml
-storage: "memory" # memory or redis
-redis:
-  host: "redis"
-  port: 6379
-  password: ""
-```
-
 ## License
 
 [MIT](./LICENSE)
