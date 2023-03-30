@@ -29,13 +29,14 @@ func Run(port int) error {
 
 	r.GET("/message/:msgID", func(c *gin.Context) {
 		msgID := c.Param("msgID")
+		msgKey := fmt.Sprintf("message:%s", msgID)
 		cache := db.GetCache()
-		if cache.Exists(msgID) {
+		if !cache.Exists(msgKey) {
 			c.String(http.StatusNotFound, "message not found")
 			return
 		}
 
-		resp, err := cache.Get(msgID)
+		resp, err := cache.Get(msgKey)
 		if err != nil {
 			c.String(http.StatusInternalServerError, "get message failed")
 			return
