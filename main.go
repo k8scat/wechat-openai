@@ -4,6 +4,7 @@ import (
 	"flag"
 
 	"github.com/k8scat/wechat-openai/config"
+	"github.com/k8scat/wechat-openai/db"
 	"github.com/k8scat/wechat-openai/log"
 	"github.com/k8scat/wechat-openai/router"
 )
@@ -18,6 +19,7 @@ func init() {
 
 func main() {
 	defer log.Sync()
+	defer db.GetRedisClient().Close()
 
 	if err := router.Run(port); err != nil {
 		panic(err)

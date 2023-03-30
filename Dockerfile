@@ -1,10 +1,10 @@
-FROM golang:1.20.2 AS builder
+FROM golang:1.20.2-alpine3.16 AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o bin/wechat-openai main.go
 
-FROM scratch
+FROM alpine:3.16
 WORKDIR /app
 COPY --from=builder /app/bin/wechat-openai .
 EXPOSE 8080
-ENTRYPOINT ["./wechat-openai", "-config", "config/config.yml"]
+CMD ["./wechat-openai", "-config", "config/config.yml"]

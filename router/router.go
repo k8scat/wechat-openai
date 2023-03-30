@@ -1,7 +1,6 @@
 package router
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,21 +28,23 @@ func Run(port int) error {
 
 	r.GET("/message/:msgID", func(c *gin.Context) {
 		msgID := c.Param("msgID")
-		conn := db.GetRedisClient().Conn()
-		defer conn.Close()
-
-		ctx := context.Background()
-		if conn.Exists(ctx, msgID).Val() == 0 {
+		cache := db.GetCache()
+		if cache.Exists(msgID) {
 			c.String(http.StatusNotFound, "message not found")
 			return
 		}
 
-		resp := conn.Get(ctx, msgID).Val()
-		if resp == "" {
+		resp, err := cache.Get(msgID)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "get message failed")
+			return
+		}
+		content, _ := resp.(string)
+		if content == "" {
 			c.String(http.StatusOK, "waiting for response")
 			return
 		}
-		c.String(http.StatusOK, resp)
+		c.String(http.StatusOK, content)
 	})
 
 	err := r.Run(fmt.Sprintf(":%d", port))

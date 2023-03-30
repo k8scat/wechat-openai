@@ -1,7 +1,6 @@
 package wechat
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -30,14 +29,13 @@ func GetOfficialAccount() *officialaccount.OfficialAccount {
 	initOfficialAccount.Do(func() {
 		// 使用memcache保存access_token，也可选择redis或自定义cache
 		wc := wechat.NewWechat()
-		memory := cache.NewMemory()
 		c := config.GetConfig()
 		cfg := &oaConfig.Config{
 			AppID:          c.Wechat.AppID,
 			AppSecret:      c.Wechat.AppSecret,
 			Token:          c.Wechat.Token,
 			EncodingAESKey: c.Wechat.EncodingAESKey,
-			Cache:          memory,
+			Cache:          cache.NewMemory(),
 		}
 		officialAccount = wc.GetOfficialAccount(cfg)
 	})
@@ -51,16 +49,13 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 	server.SetMessageHandler(func(msg *message.MixMessage) *message.Reply {
 		msgID := fmt.Sprintf("%d", msg.MsgID)
 
-		ctx := context.Background()
-		conn := db.GetRedisClient().Conn()
-		defer conn.Close()
-
-		if conn.Exists(ctx, msgID).Val() > 0 {
+		c := db.GetCache()
+		if c.Exists(msgID) {
 			log.Warn("duplicated msg", zap.Any("wechat_msg", msg))
 			return nil
 		}
 
-		if err := conn.SetEx(ctx, msgID, "", time.Minute).Err(); err != nil {
+		if err := c.Set(msgID, "", time.Minute); err != nil {
 			log.Error("cache msg id failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg))
 			return nil
 		}
@@ -98,7 +93,7 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 		case <-time.After(4 * time.Second):
 			log.Warn("openai chat timeout", zap.Any("wechat_msg", msg))
 
-			go func() {
+			go func(msgID string) {
 				var resp *openai.ChatCompletionResponse
 				select {
 				case v := <-ch:
@@ -108,14 +103,11 @@ func HandleMessage(oa *officialaccount.OfficialAccount, req *http.Request, w htt
 					}
 				}
 
-				conn := db.GetRedisClient().Conn()
-				defer conn.Close()
-
-				err := conn.SetEx(ctx, msgID, resp.Choices[0].Message.Content, time.Minute*5).Err()
-				if err != nil {
+				c := db.GetCache()
+				if err := c.Set(msgID, resp.Choices[0].Message.Content, time.Minute*5); err != nil {
 					log.Error("cache message response failed", zap.Error(err), zap.Stack("stack"), zap.Any("wechat_msg", msg), zap.Any("openai_response", resp))
 				}
-			}()
+			}(msgID)
 
 			url := fmt.Sprintf("%s/message/%d", config.GetConfig().App.BaseURL, msg.MsgID)
 			return &message.Reply{MsgType: message.MsgTypeText, MsgData: message.NewText(url)}
