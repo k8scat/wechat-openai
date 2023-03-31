@@ -29,7 +29,6 @@ func GetClient() *openai.Client {
 			clientCfg.BaseURL = cfg.OpenAI.BaseURL
 		}
 		client = openai.NewClientWithConfig(clientCfg)
-		client = openai.NewClient(cfg.OpenAI.Key)
 	})
 	return client
 }
